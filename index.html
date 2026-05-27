@@ -93,7 +93,7 @@
         <!-- Map Card (Central Visual) -->
         <section class="card map-card" id="global-map-section">
             <div class="map-header">
-                <h2 class="card-title">Mapa Global de Anfitriões</h2>
+                <h2 class="card-title">Mapa Global de Anfitriões — <span id="map-indicator-name" class="neon-text-red">PIB</span></h2>
                 <div class="map-legend">
                     <div class="legend-item"><span class="legend-circle neon-ring-legend"></span> Organiza GP de F1</div>
                     <div class="legend-item" id="legend-scale-label">Valor Económico: Baixo <span class="legend-color-scale"></span> Alto</div>
@@ -154,7 +154,7 @@
         <!-- Historical Trend Card -->
         <section class="card trend-card" id="historical-trend-section">
             <div class="trend-header">
-                <h2 class="card-title">Evolução em <span id="selected-country-name" class="neon-text-red">Portugal</span></h2>
+                <h2 class="card-title">Evolução&nbsp;de&nbsp;<span id="trend-indicator-name" class="neon-text-red">PIB</span>&nbsp;em&nbsp;<span id="selected-country-name" class="neon-text-red">Portugal</span></h2>
                 <div class="trend-header-controls">
                     <label class="toggle-switch">
                         <input type="checkbox" id="toggle-global-trend" checked>
@@ -180,7 +180,7 @@
 
         <!-- Predictor Card -->
         <section class="card predictor-card" id="impact-predictor-section">
-            <h2 class="card-title">Análise de Impacto F1</h2>
+            <h2 class="card-title">Análise de Impacto F1 — <span id="predictor-indicator-name" class="neon-text-red">PIB</span></h2>
             <div class="card-tabs">
                 <button class="tab-btn active" id="tab-forecast">Simulação 2026/27</button>
                 <button class="tab-btn" id="tab-real-impact">Impacto Real Histórico</button>
@@ -206,7 +206,7 @@
                         <div class="scenario-year">Previsão 2026</div>
                     </div>
                     <div class="net-impact-box">
-                        <div class="impact-label">Impacto Neto Projetado</div>
+                        <div class="impact-label">Impacto Líquido Projetado</div>
                         <div class="impact-value" id="val-net-impact">Loading...</div>
                     </div>
                     <div class="cost-box">
