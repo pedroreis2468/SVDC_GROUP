@@ -7,6 +7,13 @@ let _mapZoom          = null;
 let _mapSvg           = null;
 let _lastZoomTransform = null; // persiste o transform entre redesenhos
 
+// Países pequenos não representados no world.geojson simplificado
+const SMALL_COUNTRIES = {
+    "SGP": { name: "Singapura", lon: 103.8198, lat: 1.3521 },
+    "MCO": { name: "Mónaco", lon: 7.4246, lat: 43.7384 },
+    "BHR": { name: "Bahrein", lon: 50.5860, lat: 26.0667 }
+};
+
 // 1. Configurações de Estado Global
 let state = {
     currentYear: 2024,
@@ -20,7 +27,8 @@ let state = {
     showGlobalTrend: true,
     predictorTab: "forecast",
     currentSlide: 0,
-    showRelativeDiff: false
+    showRelativeDiff: false,
+    slide5ShowPortimao: false
 };
 
 // Detalhes dos Indicadores para exibição
@@ -658,12 +666,18 @@ function drawMap() {
                 document.getElementById("selected-country-name").innerText = state.dataset.countries[iso3].name;
                 document.getElementById("predictor-country-name").innerText = state.dataset.countries[iso3].name;
                 
-                // Sincroniza visualmente as bordas de todos os países no mapa
+                // Sincroniza visualmente as bordas de todos os países e pinos no mapa
                 d3.selectAll(".country")
                     .transition()
                     .duration(200)
                     .attr("stroke", c => c.id === state.selectedCountry ? "#ffffff" : "rgba(0,0,0,0.5)")
                     .attr("stroke-width", c => c.id === state.selectedCountry ? 2.2 : 0.6);
+
+                d3.selectAll(".small-country-pin")
+                    .transition()
+                    .duration(200)
+                    .attr("stroke", c => c.id === state.selectedCountry ? "#ffffff" : "var(--f1-red)")
+                    .attr("stroke-width", c => c.id === state.selectedCountry ? 2.2 : 1.0);
 
                 // Redesenha gráficos dependentes do país selecionado
                 updateIndicatorDetails();
@@ -673,7 +687,103 @@ function drawMap() {
             }
         });
 
-    // 7. Adiciona círculos pulsantes para os anfitriões de GP do ano corrente
+    // 7. Desenha pinos para os países pequenos que não estão no GeoJSON
+    const smallCountriesData = Object.keys(SMALL_COUNTRIES).map(code => {
+        const coords = projection([SMALL_COUNTRIES[code].lon, SMALL_COUNTRIES[code].lat]);
+        return {
+            id: code,
+            name: SMALL_COUNTRIES[code].name,
+            coords: coords
+        };
+    }).filter(d => d.coords && !isNaN(d.coords[0]) && !isNaN(d.coords[1]));
+
+    g.selectAll(".small-country-pin")
+        .data(smallCountriesData)
+        .enter()
+        .append("circle")
+        .attr("class", "small-country-pin")
+        .attr("cx", d => d.coords[0])
+        .attr("cy", d => d.coords[1])
+        .attr("r", 5.5)
+        .attr("fill", d => {
+            const countryData = state.dataset.countries[d.id];
+            if (countryData) {
+                const val = countryData.indicators[ind][currentYearStr];
+                if (val !== undefined && val !== null) {
+                    return colorScale(val);
+                }
+            }
+            return "#161920";
+        })
+        .attr("stroke", d => d.id === state.selectedCountry ? "#ffffff" : "var(--f1-red)")
+        .attr("stroke-width", d => d.id === state.selectedCountry ? 2.2 : 1.0)
+        .style("cursor", "pointer")
+        .on("mouseover", (event, d) => {
+            const iso3 = d.id;
+            const countryData = state.dataset.countries[iso3];
+            let content = `<div class="tooltip-title"><span>🗺️ ${d.name}</span><span style="font-size:0.75rem;color:var(--text-muted)">${iso3}</span></div>`;
+            
+            if (countryData) {
+                const val = countryData.indicators[ind][currentYearStr];
+                const valStr = (val !== undefined && val !== null) ? indDetails.format(val) : "Sem dados";
+                const isHost = countryData.gps.includes(state.currentYear);
+                
+                content += `<div class="tooltip-row"><span class="tooltip-key">${indDetails.name}</span><span class="tooltip-val">${valStr}</span></div>`;
+                content += `<div class="tooltip-row"><span class="tooltip-key">GPs Históricos</span><span class="tooltip-val">${countryData.gps.length}</span></div>`;
+                
+                if (isHost) {
+                    content += `<div class="tooltip-badge badge-gp">🏎️ Anfitrião F1 em ${state.currentYear}</div>`;
+                } else {
+                    content += `<div class="tooltip-badge badge-nongp">Sem F1 em ${state.currentYear}</div>`;
+                }
+            } else {
+                content += `<div class="tooltip-row" style="color:var(--text-muted)">Sem histórico de F1</div>`;
+            }
+            
+            tooltip.html(content)
+                .style("opacity", 1)
+                .style("left", (event.pageX + 15) + "px")
+                .style("top", (event.pageY - 15) + "px");
+        })
+        .on("mousemove", (event) => {
+            tooltip.style("left", (event.pageX + 15) + "px")
+                   .style("top", (event.pageY - 15) + "px");
+        })
+        .on("mouseleave", () => {
+            tooltip.style("opacity", 0);
+        })
+        .on("click", (event, d) => {
+            const iso3 = d.id;
+            if (state.dataset.countries[iso3]) {
+                state.selectedCountry = iso3;
+                
+                // Atualiza seleção e textos da interface
+                document.getElementById("predictor-country-select").value = iso3;
+                document.getElementById("selected-country-name").innerText = state.dataset.countries[iso3].name;
+                document.getElementById("predictor-country-name").innerText = state.dataset.countries[iso3].name;
+                
+                // Sincroniza visualmente as bordas e pinos no mapa
+                d3.selectAll(".country")
+                    .transition()
+                    .duration(200)
+                    .attr("stroke", c => c.id === state.selectedCountry ? "#ffffff" : "rgba(0,0,0,0.5)")
+                    .attr("stroke-width", c => c.id === state.selectedCountry ? 2.2 : 0.6);
+
+                d3.selectAll(".small-country-pin")
+                    .transition()
+                    .duration(200)
+                    .attr("stroke", c => c.id === state.selectedCountry ? "#ffffff" : "var(--f1-red)")
+                    .attr("stroke-width", c => c.id === state.selectedCountry ? 2.2 : 1.0);
+
+                // Redesenha gráficos dependentes do país selecionado
+                updateIndicatorDetails();
+                drawTrendChart();
+                drawPredictor();
+                drawKeyFindings();
+            }
+        });
+
+    // 8. Adiciona círculos pulsantes para os anfitriões de GP do ano corrente
     const gpCountriesThisYear = [];
     state.geoData.features.forEach(f => {
         const iso3 = f.id;
@@ -688,6 +798,18 @@ function drawMap() {
                     name: cData.name
                 });
             }
+        }
+    });
+
+    // Também inclui países pequenos anfitriões no efeito pulsante
+    smallCountriesData.forEach(d => {
+        const cData = state.dataset.countries[d.id];
+        if (cData && cData.gps.includes(state.currentYear)) {
+            gpCountriesThisYear.push({
+                iso3: d.id,
+                coords: d.coords,
+                name: cData.name
+            });
         }
     });
 
@@ -716,7 +838,30 @@ function centerMapOnCountry(iso3, zoomLevel) {
     if (!_mapSvg || !_mapProjection || !_mapPath || !_mapZoom || !state.geoData) return;
 
     const feature = state.geoData.features.find(f => f.id === iso3);
-    if (!feature) return;
+    if (!feature) {
+        // Fallback para os pequenos países que não têm geometria no GeoJSON
+        const smallC = SMALL_COUNTRIES[iso3];
+        if (smallC) {
+            const container = document.querySelector(".map-wrapper");
+            const width  = container.clientWidth;
+            const height = container.clientHeight || 400;
+            const autoScale = zoomLevel || 6.5; // Zoom alto para países pequenos
+            const coords = _mapProjection([smallC.lon, smallC.lat]);
+            
+            if (coords && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                const transform = d3.zoomIdentity
+                    .translate(width / 2, height / 2)
+                    .scale(autoScale)
+                    .translate(-coords[0], -coords[1]);
+
+                _mapSvg.transition()
+                    .duration(900)
+                    .ease(d3.easeCubicInOut)
+                    .call(_mapZoom.transform, transform);
+            }
+        }
+        return;
+    }
 
     const container = document.querySelector(".map-wrapper");
     const width  = container.clientWidth;
@@ -786,6 +931,23 @@ function updateMapOnly() {
         .attr("stroke", d => d.id === state.selectedCountry ? "#ffffff" : "rgba(0,0,0,0.5)")
         .attr("stroke-width", d => d.id === state.selectedCountry ? 2.2 : 0.6);
 
+    // Atualiza cor de preenchimento e bordas dos pinos de países pequenos
+    d3.selectAll(".small-country-pin")
+        .transition()
+        .duration(200)
+        .attr("fill", function(d) {
+            const countryData = state.dataset.countries[d.id];
+            if (countryData) {
+                const val = countryData.indicators[ind][currentYearStr];
+                if (val !== undefined && val !== null) {
+                    return colorScale(val);
+                }
+            }
+            return "#161920";
+        })
+        .attr("stroke", d => d.id === state.selectedCountry ? "#ffffff" : "var(--f1-red)")
+        .attr("stroke-width", d => d.id === state.selectedCountry ? 2.2 : 1.0);
+
     // Reconstrói as marcas de GPs do novo ano
     const svg = d3.select("#world-map");
     const g = svg.select("g");
@@ -845,11 +1007,13 @@ function drawTrendChart() {
     
     const svg = d3.select("#trend-chart")
         .attr("width", width)
-        .attr("height", height);
+        .attr("height", height)
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("preserveAspectRatio", "none");
         
     svg.selectAll("*").remove();
 
-    const margin = { top: 20, right: 30, bottom: 40, left: 75 };
+    const margin = { top: 20, right: 30, bottom: 45, left: 75 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
 
@@ -911,21 +1075,53 @@ function drawTrendChart() {
     const chartBody = g.append("g")
         .attr("clip-path", `url(#${clipId})`);
 
+    // Determinar se estamos em modo apresentação (Story Mode) e aplicar zoom temporal
+    const isStoryMode = document.getElementById("mode-story")?.classList.contains("active");
+    let zoomRange = null;
+    let highlightRange = null;
+
+    if (isStoryMode) {
+        if (state.currentSlide === 3) { // Slide 4: Azerbaijão (Turismo)
+            zoomRange = [2015, 2024];
+            highlightRange = [2016, 2019];
+        } else if (state.currentSlide === 4) { // Slide 5: Portugal (FDI)
+            if (state.slide5ShowPortimao) {
+                zoomRange = [2015, 2024];
+                highlightRange = [2020, 2021];
+            } else {
+                zoomRange = [1983, 1996];
+                highlightRange = [1984, 1996];
+            }
+        } else if (state.currentSlide === 5) { // Slide 6: Portugal Conclusão (Turismo)
+            zoomRange = [1996, 2024];
+            highlightRange = [1996, 2024];
+        }
+    }
+
+    // Filtrar pontos temporais se houver zoomRange ativo para calcular yDomain dinâmico
+    const filteredDataPoints = zoomRange 
+        ? dataPoints.filter(d => d.year >= zoomRange[0] && d.year <= zoomRange[1])
+        : dataPoints;
+        
+    const filteredGlobalPoints = zoomRange
+        ? globalPoints.filter(d => d.year >= zoomRange[0] && d.year <= zoomRange[1])
+        : globalPoints;
+
     // Escalas
     const xScale = d3.scaleLinear()
-        .domain(d3.extent(dataPoints, d => d.year))
+        .domain(zoomRange || d3.extent(dataPoints, d => d.year))
         .range([0, chartWidth]);
 
     let yDomain;
     if (state.showRelativeDiff) {
-        yDomain = d3.extent(dataPoints, d => d.value);
+        yDomain = d3.extent(filteredDataPoints, d => d.value);
         // Garante que o zero está sempre visível
         if (yDomain[0] > 0) yDomain[0] = -0.5;
         if (yDomain[1] < 0) yDomain[1] = 0.5;
     } else {
         const allValues = state.showGlobalTrend
-            ? dataPoints.map(d => d.value).concat(globalPoints.map(d => d.value))
-            : dataPoints.map(d => d.value);
+            ? filteredDataPoints.map(d => d.value).concat(filteredGlobalPoints.map(d => d.value))
+            : filteredDataPoints.map(d => d.value);
         yDomain = d3.extent(allValues);
     }
 
@@ -933,6 +1129,42 @@ function drawTrendChart() {
         .domain(yDomain)
         .nice()
         .range([chartHeight, 0]);
+
+    // Desenhar banda de destaque dos anos referidos no texto (Slide 4, 5, 6)
+    if (highlightRange) {
+        const xStart = xScale(highlightRange[0]);
+        const xEnd = xScale(highlightRange[1]);
+        chartBody.append("rect")
+            .attr("x", xStart)
+            .attr("y", 0)
+            .attr("width", Math.max(2, xEnd - xStart))
+            .attr("height", chartHeight)
+            .attr("fill", "rgba(225, 6, 0, 0.08)") // Destaque F1 Red suave
+            .attr("stroke", "rgba(225, 6, 0, 0.25)")
+            .attr("stroke-width", 1.5)
+            .attr("stroke-dasharray", "4,4");
+            
+        let labelText = "";
+        if (state.currentSlide === 3) labelText = "Estudos PwC (2016-2019)";
+        if (state.currentSlide === 4) {
+            labelText = state.slide5ShowPortimao ? "GPs Portimão (2020-2021)" : "Era Estoril F1 (1984-1996)";
+        }
+        if (state.currentSlide === 5) labelText = "Pós-Estoril (1996-2024)";
+        
+        if (labelText) {
+            chartBody.append("text")
+                .attr("x", xStart + 8)
+                .attr("y", 22) // Posicionado no topo esquerdo da banda para evitar sobreposições com pontos no fundo
+                .attr("fill", "rgba(255, 255, 255, 0.75)")
+                .attr("font-size", "0.75rem")
+                .attr("font-weight", "600")
+                .style("paint-order", "stroke")
+                .style("stroke", "#16181d")
+                .style("stroke-width", "3px")
+                .style("stroke-linejoin", "round")
+                .text(labelText);
+        }
+    }
 
     // Grelha Horizontal e Vertical
     g.append("g")
@@ -1356,9 +1588,11 @@ function drawTrendChart() {
     }
 
     // Desenha a legenda das linhas
+    // Desenha a legenda das linhas no canto superior direito para evitar sobreposições
+    const legendWidth = (state.showGlobalTrend && !state.showRelativeDiff) ? 270 : 180;
     const legend = svg.append("g")
         .attr("class", "chart-legend")
-        .attr("transform", `translate(${margin.left + 15}, ${margin.top + 5})`);
+        .attr("transform", `translate(${width - margin.right - legendWidth - 10}, ${margin.top + 5})`);
 
     // Linha do país selecionado
     legend.append("line")
@@ -1493,7 +1727,9 @@ function drawPredictor() {
     
     const svg = d3.select("#predictor-chart")
         .attr("width", width)
-        .attr("height", height);
+        .attr("height", height)
+        .attr("viewBox", `0 0 ${width} ${height}`)
+        .attr("preserveAspectRatio", "none");
         
     svg.selectAll("*").remove();
 
@@ -2257,14 +2493,15 @@ const STORY_SLIDES = [
     },
     {
         title: "4. O Soft Power: Visibilidade como Estratégia",
-        indicator: "FDI",
+        indicator: "Tourism_arrivals",
         country: "AZE",
-        year: 2021,
+        year: 2019,
         tab: "real",
         zoom: 3.5,
-        text: `Para países como o Azerbaijão, Qatar ou Arábia Saudita, o GP é uma ferramenta de <strong>soft power geopoílítico</strong> — não um investimento financeiro tradicional. Pagam entre <strong>$40M e $57M por ano</strong> para transmitir em direto para 500 milhões de espetadores.
+        text: `Para países como o Azerbaijão, o GP é uma ferramenta de <strong>soft power geopolítico</strong>. O país investe cerca de <strong>$57M/ano</strong> em licenças para se expor a 500 milhões de espetadores globais.
         <br><br>
-        O retorno não é medido em PIB mas em <em>percepção internacional, atração turística futura e diplomacia empresarial</em>. Para o Azerbaijão pós-petrolífero, Baku como montra global é o objetivo — e a F1 é o veículo mais eficiente para isso.`
+        <strong>As Evidências</strong>: Estudos da PwC revelam que a F1 injetou <strong>$506.3M líquidos</strong> na economia de Baku em apenas 4 anos (2016-2019), elevando a ocupação hoteleira a 98% na semana da corrida. 
+        A nível nacional, o turismo saltou de <strong>2.01M em 2015</strong> (ano pré-F1) para <strong>3.17M em 2019</strong> (crescimento de 58%) e atingiu o recorde de <strong>3.55M em 2024</strong>. O ROI não reside no PIB imediato, mas no turismo acumulado e posicionamento de marca-país.`
     },
     {
         title: "5. O Caso de Portugal: IDE e Adesão Industrial",
@@ -2275,25 +2512,34 @@ const STORY_SLIDES = [
         zoom: 4.5,
         text: `Portugal é o exemplo europeu mais fascinante. A era do Estoril (1984–1996) coincidiu com a entrada na CEE e com um período de forte atração de investimento estrangeiro — incluindo a <strong>AutoEuropa em Palmela (assinada em 1991)</strong>.
         <br><br>
-        Não é causalidade direta, mas a F1 funcionou como <em>plataforma de B2B e diplomacia corporativa</em>, posicionando Portugal no mapa dos decisores industriais europeus. Em 2020–2021, Portimão repetiu esse papel — agora com investidores de tecnologia e logística.`
+        <strong>As Evidências</strong>: A F1 atuou como plataforma de <em>B2B e diplomacia corporativa</em>. Em 1991, o IDE em Portugal atingiu <strong>$2.45B</strong> (vs. <strong>$147M em 1983</strong>, pré-Estoril). Em 2020 (pandemia), Portimão atraiu investidores internacionais e gerou <strong>€26.7M-€27.7M de impacto direto</strong> contra um investimento público de <strong>€9.4M</strong>, comprovando o retorno imediato da promoção.`
     },
     {
-        title: "6. O Veredicto: O Que os Dados Dizem Mesmo",
+        title: "6. Conclusão",
         indicator: "Tourism_arrivals",
         country: "PRT",
         year: 2026,
         tab: "forecast",
+        model: "xgboost",
         zoom: 4.5,
-        text: `Os dados falam. Analisando <strong>889 pares país-ano</strong> entre 1960 e 2024, os países anfitriões cresceram em turismo <strong>+8.2% por ano</strong> nos anos de GP vs <strong>+6.9% nos anos sem GP</strong> — um diferencial consistente de <strong>+1.33 pp</strong>.
+        text: `Os dados falam. Analisando <strong>889 pares país-ano</strong> entre 1960 e 2024, os países anfitriões cresceram em turismo <strong>+8.2% por ano</strong> nos anos de GP vs <strong>+6.9% nos anos sem GP</strong> — um ganho líquido estrutural de <strong>+1.33 pp</strong>.
         <br><br>
-        Portugal ilustra o efeito acumulado: o turismo passou de <strong>9.7M visitantes em 1996</strong> (último ano do GP do Estoril) para <strong>19.4M em 2024</strong> — duplicou. O FDI médio anual durante a era Estoril foi de <strong>$1.2B/ano</strong>; nas décadas seguintes subiu para <strong>$7.8B/ano</strong>. Para a Singapura, o FDI nos anos de F1 é <strong>$77.6B vs $40.8B</strong> nos anos sem F1 — quase o dobro.
+        <strong>Simulação XGBoost 2026 (Portugal)</strong>: O modelo estima que receber a F1 em 2026 gerará um crescimento turístico de <strong>+14.33%</strong> vs. <strong>+11.01%</strong> sem GP — um ganho líquido de <strong>+$201M</strong> no setor (retorno macro de <strong>+618%</strong> sobre a taxa de licença de $28M).
         <br><br>
-        <strong>Conclusão pelos dados</strong>: o retorno não aparece no PIB do ano da corrida (-1.10 pp em média). Aparece no turismo acumulado, no FDI estrutural e na trajetória de longo prazo das economias que acolhem o evento de forma consistente.`
+        <strong>Efeito Acumulado</strong>: Portugal duplicou os turistas desde o fim da era Estoril (de 9.7M em 1996 para 19.4M em 2024), e o FDI médio saltou de $1.2B para $7.8B/ano. Para a Singapura, o FDI nos anos de F1 é <strong>$77.6B vs $40.8B</strong> nos anos comuns. A F1 atua como multiplicador de longo prazo.`
     }
 ];
 
 function goToSlide(index) {
     if (index < 0 || index >= STORY_SLIDES.length) return;
+    
+    // Cancelar qualquer agendamento de troca pendente
+    if (state.slide4SwapTimeout) {
+        clearTimeout(state.slide4SwapTimeout);
+        state.slide4SwapTimeout = null;
+    }
+
+    state.slide5ShowPortimao = false;
     state.currentSlide = index;
 
     const slide = STORY_SLIDES[index];
@@ -2302,6 +2548,75 @@ function goToSlide(index) {
     state.currentIndicator = slide.indicator;
     state.selectedCountry = slide.country;
     state.currentYear = (slide.year === 2026 || slide.year === 2027) ? 2024 : slide.year;
+
+    // Configura comportamento específico do Slide 4 (Baku / Azerbaijão)
+    const toggleGlobalCheckbox = document.getElementById("toggle-global-trend");
+    const toggleGlobalLabel = toggleGlobalCheckbox ? toggleGlobalCheckbox.closest(".toggle-switch") : null;
+    const toggleRelativeCheckbox = document.getElementById("toggle-relative-diff");
+    const toggleRelativeLabel = toggleRelativeCheckbox ? toggleRelativeCheckbox.closest(".toggle-switch") : null;
+    const trendCard = document.getElementById("historical-trend-section");
+    const mapCard = document.getElementById("global-map-section");
+    const predictorCard = document.getElementById("impact-predictor-section");
+
+    // Limpar as classes de layout trocado de slides anteriores
+    if (trendCard) trendCard.classList.remove("slide4-layout");
+    if (predictorCard) predictorCard.classList.remove("slide6-layout");
+    if (mapCard) {
+        mapCard.classList.remove("slide4-layout");
+        mapCard.classList.remove("slide6-layout");
+    }
+
+    if (index === 3 || index === 4 || index === 5) { // Slide 4 (Baku), Slide 5 (Portugal) ou Slide 6 (Conclusão)
+        state.showGlobalTrend = false;
+        state.showRelativeDiff = false;
+        if (toggleGlobalCheckbox) {
+            toggleGlobalCheckbox.checked = false;
+            toggleGlobalCheckbox.disabled = true;
+        }
+        if (toggleGlobalLabel) {
+            toggleGlobalLabel.style.display = "none";
+        }
+        if (toggleRelativeCheckbox) {
+            toggleRelativeCheckbox.checked = false;
+            toggleRelativeCheckbox.disabled = true;
+        }
+        if (toggleRelativeLabel) {
+            toggleRelativeLabel.style.display = "none";
+        }
+
+        // Permutar posições dos cards com animação após 2 segundos (apenas para Slide 4 e Slide 5)
+        if (index === 3 || index === 4) {
+            state.slide4SwapTimeout = setTimeout(() => {
+                if (trendCard) trendCard.classList.add("slide4-layout");
+                if (mapCard) mapCard.classList.add("slide4-layout");
+            }, 2000);
+        }
+    } else {
+        // Restaura para outros slides
+        state.showGlobalTrend = true;
+        if (toggleGlobalCheckbox) {
+            toggleGlobalCheckbox.checked = true;
+            toggleGlobalCheckbox.disabled = false;
+        }
+        if (toggleGlobalLabel) {
+            toggleGlobalLabel.style.display = "flex";
+        }
+        if (toggleRelativeCheckbox) {
+            toggleRelativeCheckbox.disabled = false;
+        }
+        if (toggleRelativeLabel) {
+            toggleRelativeLabel.style.display = "flex";
+        }
+        
+        if (trendCard) trendCard.classList.remove("slide4-layout");
+        if (mapCard) mapCard.classList.remove("slide4-layout");
+        
+        // Mantém/rola para a vista do mapa para os outros slides
+        const mapSection = document.getElementById("global-map-section");
+        if (mapSection) {
+            mapSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    }
 
     // Configura a aba do simulador/previsor
     if (slide.tab) {
@@ -2398,10 +2713,42 @@ function goToSlide(index) {
     if (prevBtn) prevBtn.disabled = index === 0;
     
     if (nextBtn) {
-        if (index === STORY_SLIDES.length - 1) {
-            nextBtn.textContent = "Concluir 🏁";
+        if (index === STORY_SLIDES.length - 1) { // Slide 6: Conclusão
+            nextBtn.textContent = "Ver Previsão 📊";
             nextBtn.onclick = () => {
-                setMode("dashboard");
+                // ETAPA 2: Mostrar Previsão de ML (auto-regressivo)
+                const mapCard = document.getElementById("global-map-section");
+                const predictorCard = document.getElementById("impact-predictor-section");
+                const trendCard = document.getElementById("historical-trend-section");
+
+                if (predictorCard) predictorCard.classList.add("slide6-layout");
+                if (mapCard) mapCard.classList.add("slide6-layout");
+
+                nextBtn.textContent = "Ver Histórico 📈";
+                nextBtn.onclick = () => {
+                    // ETAPA 3: Mostrar Histórico de Evolução de Turismo
+                    if (predictorCard) predictorCard.classList.remove("slide6-layout");
+                    if (mapCard) mapCard.classList.remove("slide6-layout");
+
+                    if (trendCard) trendCard.classList.add("slide4-layout");
+                    if (mapCard) mapCard.classList.add("slide4-layout");
+
+                    nextBtn.textContent = "Concluir 🏁";
+                    nextBtn.onclick = () => {
+                        setMode("dashboard");
+                    };
+                };
+            };
+        } else if (index === STORY_SLIDES.length - 2) { // Slide 5: Portugal Estoril/Portimão
+            nextBtn.textContent = "Ver Portimão 🏎️";
+            nextBtn.onclick = () => {
+                state.slide5ShowPortimao = true;
+                drawTrendChart();
+                
+                nextBtn.textContent = "Seg. ▶";
+                nextBtn.onclick = () => {
+                    goToSlide(state.currentSlide + 1);
+                };
             };
         } else {
             nextBtn.textContent = "Seg. ▶";
@@ -2434,6 +2781,12 @@ function setMode(mode) {
         storyPanel.style.display = "flex";
         goToSlide(0);
     } else {
+        // Cancelar qualquer agendamento de troca pendente
+        if (state.slide4SwapTimeout) {
+            clearTimeout(state.slide4SwapTimeout);
+            state.slide4SwapTimeout = null;
+        }
+
         btnDashboard.classList.add("active");
         btnStory.classList.remove("active");
         storyPanel.style.display = "none";
@@ -2444,6 +2797,7 @@ function setMode(mode) {
         state.selectedCountry = "PRT";
         state.currentYear = 2024;
         state.showRelativeDiff = false;
+        state.slide5ShowPortimao = false;
         
         // Repor zoom do mapa para vista global
         if (_mapSvg && _mapZoom) {
@@ -2454,16 +2808,35 @@ function setMode(mode) {
                 .call(_mapZoom.transform, d3.zoomIdentity);
         }
         
+        // Restaurar classes de posições dos cards
+        const trendCard = document.getElementById("historical-trend-section");
+        const mapCard = document.getElementById("global-map-section");
+        const predictorCard = document.getElementById("impact-predictor-section");
+        if (trendCard) trendCard.classList.remove("slide4-layout");
+        if (mapCard) mapCard.classList.remove("slide4-layout");
+        if (predictorCard) predictorCard.classList.remove("slide6-layout");
+        if (mapCard) mapCard.classList.remove("slide6-layout");
+        
         const relativeToggle = document.getElementById("toggle-relative-diff");
         if (relativeToggle) {
             relativeToggle.checked = false;
+            relativeToggle.disabled = false;
+            const relativeLabel = relativeToggle.closest(".toggle-switch");
+            if (relativeLabel) {
+                relativeLabel.style.display = "flex";
+                relativeLabel.style.opacity = "1";
+            }
         }
         
         const globalToggle = document.getElementById("toggle-global-trend");
         if (globalToggle) {
             globalToggle.disabled = false;
             globalToggle.checked = true;
-            globalToggle.parentElement.style.opacity = "1";
+            const globalLabel = globalToggle.closest(".toggle-switch");
+            if (globalLabel) {
+                globalLabel.style.display = "flex";
+                globalLabel.style.opacity = "1";
+            }
             state.showGlobalTrend = true;
         }
         

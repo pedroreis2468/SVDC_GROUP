@@ -191,15 +191,15 @@ body {
 }
 
 .trend-card {
-    grid-column: 1 / 3;
+    grid-column: 1 / 4;
     grid-row: 3;
-    min-height: 430px;
+    min-height: auto;
 }
 
 .predictor-card {
-    grid-column: 3;
-    grid-row: 3;
-    min-height: 430px;
+    grid-column: 1 / 4;
+    grid-row: 4;
+    min-height: auto;
 }
 
 @media (max-width: 1200px) {
@@ -677,8 +677,8 @@ body {
 .chart-wrapper {
     position: relative;
     width: 100%;
-    flex-grow: 1;
-    min-height: 250px;
+    height: 250px;
+    margin-bottom: 10px;
 }
 
 #trend-chart {
@@ -732,13 +732,15 @@ body {
 
 .predictor-split {
     display: flex;
-    flex-direction: column;
-    gap: 20px;
+    flex-direction: row;
+    gap: 30px;
     flex-grow: 1;
+    align-items: stretch;
 }
 
 .forecast-chart-area {
-    min-height: 200px;
+    flex: 1.2;
+    min-height: 230px;
 }
 
 #predictor-chart {
@@ -747,10 +749,18 @@ body {
 }
 
 .forecast-metrics {
+    flex: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
     justify-content: space-between;
+}
+
+@media (max-width: 950px) {
+    .predictor-split {
+        flex-direction: column;
+        gap: 20px;
+    }
 }
 
 .forecast-metrics > div {
@@ -1301,6 +1311,15 @@ body {
     box-shadow: 0 0 6px var(--f1-red-glow);
 }
 
+/* Small Country Pins (Singapore, Monaco, Bahrain) */
+.small-country-pin {
+    transition: fill 0.2s ease, stroke 0.2s ease, stroke-width 0.2s ease, r 0.2s ease;
+}
+.small-country-pin:hover {
+    filter: brightness(1.3);
+    r: 7.5;
+}
+
 /* Print Layout for Academic Poster */
 @media print {
     body {
@@ -1495,5 +1514,81 @@ body {
         font-size: 7pt !important;
         color: #666 !important;
         margin-top: 5px !important;
+    }
+}
+
+/* Slide 4 layout swap (Trend Card to top right, Map Card to bottom) */
+@media (min-width: 1201px) {
+    .trend-card.slide4-layout {
+        grid-row: 1 !important;
+        grid-column: 2 / 4 !important;
+        animation: slideUpSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .map-card.slide4-layout {
+        grid-row: 3 !important;
+        grid-column: 1 / 4 !important;
+        animation: slideDownSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+}
+
+@media (min-width: 951px) and (max-width: 1200px) {
+    .trend-card.slide4-layout {
+        grid-row: 1 !important;
+        grid-column: 2 !important;
+        animation: slideUpSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .map-card.slide4-layout {
+        grid-row: 3 !important;
+        grid-column: 1 / 3 !important;
+        animation: slideDownSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+}
+
+@keyframes slideUpSwap {
+    0% {
+        opacity: 0;
+        transform: translateY(80px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes slideDownSwap {
+    0% {
+        opacity: 0;
+        transform: translateY(-80px) scale(0.95);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* Slide 6 layout swap (Predictor Card to top right, Map Card to bottom) */
+@media (min-width: 1201px) {
+    .predictor-card.slide6-layout {
+        grid-row: 1 !important;
+        grid-column: 2 / 4 !important;
+        animation: slideUpSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .map-card.slide6-layout {
+        grid-row: 4 !important;
+        grid-column: 1 / 4 !important;
+        animation: slideDownSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+}
+
+@media (min-width: 951px) and (max-width: 1200px) {
+    .predictor-card.slide6-layout {
+        grid-row: 1 !important;
+        grid-column: 2 !important;
+        animation: slideUpSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    .map-card.slide6-layout {
+        grid-row: 4 !important;
+        grid-column: 1 / 3 !important;
+        animation: slideDownSwap 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
     }
 }
