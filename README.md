@@ -80,3 +80,38 @@ O projeto adota uma arquitetura limpa de alto desempenho visual:
   * **Modo Simulação (2026/27)**: Permite simular o impacto de acolher ou não um GP em 2026/2027, exibindo os resultados gerados pelos modelos de ML (XGBoost, Random Forest, Ridge) com métricas de confiança ($R^2$ e MAE).
   * **Modo Impacto Real Histórico**: Retrospectiva robusta baseada em **medianas** estatísticas ao longo de toda a série histórica (eliminando distorções de anos atípicos e YoY voláteis) para provar o verdadeiro diferencial entre anos de corrida e anos normais.
   * **Painel de ROI Est. (Retorno do Investimento)**: Traduz o impacto percentual do indicador em dólares americanos estimados com base no PIB base do país e custos reais de licenciamento.
+
+---
+
+## 🚀 Como Executar o Projeto Localmente
+
+Como a aplicação realiza o carregamento de ficheiros locais JSON (base de dados processada e coordenadas geográficas do mapa), o navegador necessita de ser servido através de um **servidor HTTP local** para cumprir as políticas de segurança CORS (não sendo recomendado abrir diretamente o ficheiro `index.html` via double-click).
+
+Escolha uma das seguintes formas simples para executar o projeto:
+
+### Opção A: Usando Python (Recomendado)
+Se tiver o Python instalado no seu sistema, execute o seguinte comando na pasta raiz do projeto:
+```bash
+python -m http.server 8080
+```
+*(ou `python3 -m http.server 8080` em sistemas Linux/macOS)*.
+Depois, abra o navegador e aceda a: **[http://localhost:8080](http://localhost:8080)**.
+
+### Opção B: Usando Node.js / npm
+Se utiliza o ecossistema de Node.js, pode rodar diretamente na pasta raiz:
+```bash
+npx live-server
+```
+*(o live-server abrirá automaticamente uma aba no navegador no endereço correto)*.
+Alternativamente, pode usar o pacote `http-server`:
+```bash
+npm install -g http-server
+http-server -p 8080
+```
+
+### Opção C: Extensão "Live Server" do VS Code
+Se utiliza o **Visual Studio Code**:
+1. Aceda ao separador de extensões e instale a extensão **Live Server** (desenvolvida por Ritwick Dey).
+2. Abra a pasta deste projeto no VS Code.
+3. Clique no botão **"Go Live"** que surgirá na barra de estado (no canto inferior direito do editor).
+
