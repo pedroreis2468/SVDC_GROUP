@@ -2247,11 +2247,11 @@ const STORY_SLIDES = [
     {
         title: "3. O Custo Fiscal: Quando o Retorno é Negativo",
         indicator: "GDP_growth",
-        country: "MAR",
+        country: "ZAF",
         year: 1983,
         tab: "real",
         zoom: 2.8,
-        text: `Nem todos os anfitriões saem a ganhar. Marrocos (1958 e 1983) é o exemplo mais claro: a corrida aconteceu numa fase de elevada instabilidade macroeconómica, e os nossos modelos estimam que <strong>o custo fiscal não foi compensado por crescimento económico</strong> nesse período.
+        text: `Nem todos os anfitriões saem a ganhar. A África do Sul é o exemplo mais claro: a corrida aconteceu numa fase de elevada instabilidade macroeconómica, e os nossos modelos estimam que <strong>o custo fiscal não foi compensado por crescimento económico</strong> nesse período.
         <br><br>
         Isto não significa que a F1 destruiu valor — significa que acolher um GP <em>sem o contexto económico adequado</em> ou <em>sem infraestruturas de suporte</em> resulta num retorno macroeconómico negativo. O momento e o ecossistema importam tanto quanto o evento.`
     },
