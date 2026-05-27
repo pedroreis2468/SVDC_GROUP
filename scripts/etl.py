@@ -28,7 +28,9 @@ INDICATORS = {
     "GDP_pc": "NY.GDP.PCAP.KD",             # GDP per capita (constant 2015 US$)
     "Inflation": "FP.CPI.TOTL.ZG",          # Inflation, consumer prices (annual %)
     "Tourism_arrivals": "ST.INT.ARVL",      # International tourism, arrivals
-    "FDI": "BX.KLT.DINV.CD.WD"              # Foreign direct investment, net inflows (current USD)
+    "FDI": "BX.KLT.DINV.CD.WD",             # Foreign direct investment, net inflows (current USD)
+    "Unemployment": "SL.UEM.TOTL.ZS",       # Unemployment, total (% of total labor force)
+    "Trade": "NE.TRD.GNFS.ZS"               # Trade (% of GDP)
 }
 
 # Exclude economic crisis years (2008-2009) and pandemic years (2020-2021) from model training to avoid external shock bias.
@@ -287,7 +289,7 @@ def main():
                 if y in EXCLUDED_ANOMALY_YEARS:
                     continue
 
-                if ind in ["GDP_growth", "Inflation", "Unemployment"]:
+                if ind in ["GDP_growth", "Inflation", "Unemployment", "Trade"]:
                     # Rate/percentage indicator: use the value directly (level comparison)
                     val = history[y]
                 else:
@@ -326,7 +328,7 @@ def main():
                 if iso3 in wb_data and ind in wb_data[iso3] and y in wb_data[iso3][ind]:
                     vals.append(wb_data[iso3][ind][y])
             if vals:
-                global_averages[ind][str(y)] = sum(vals) / len(vals)
+                global_averages[ind][str(y)] = float(np.median(vals))
 
     # 7. Model Fitting and Forecasting (2026-2027)
     final_output = {
@@ -372,33 +374,64 @@ def main():
         for ind in INDICATORS.keys():
             country_record["indicators"][ind] = wb_data[iso3][ind]
 
-        # For predictions, we build a model for each indicator
+        # Compute rate histories for all indicators for this country
+        country_rates = {}
         for ind in INDICATORS.keys():
             history = wb_data[iso3][ind]
+            rate_history = {y: 0.0 for y in range(1960, 2025)}
+            for y in range(1960, 2025):
+                if y in history:
+                    if ind in ["GDP_growth", "Inflation", "Unemployment", "Trade"]:
+                        rate_history[y] = history[y]
+                    else:
+                        if (y - 1) in history and history[y - 1] != 0:
+                            rate_history[y] = ((history[y] - history[y - 1]) / abs(history[y - 1])) * 100.0
+                            if ind == "FDI":
+                                rate_history[y] = max(-100.0, min(rate_history[y], 200.0))
+            country_rates[ind] = rate_history
+
+        # Train models for all indicators and save them in memory
+        models = {"xgboost": {}, "ridge": {}, "rf": {}}
+        gp_effects = {}
+        has_hosted = len(gps) > 0
+
+        # Helper to extract features for training (from historical rates dict of dicts)
+        def get_var_features_train(y, target_ind, rates_dict, gp_val):
+            feat = [rates_dict[target_ind][y-1], gp_val]
+            for k in sorted(INDICATORS.keys()):
+                if k != target_ind:
+                    feat.append(rates_dict[k][y-1])
+            return feat
+
+        # Helper to extract features for forecasting (from dict of single-year values)
+        def get_var_features_forecast(prev_rates_dict, gp_val, target_ind):
+            feat = [prev_rates_dict[target_ind], gp_val]
+            for k in sorted(INDICATORS.keys()):
+                if k != target_ind:
+                    feat.append(prev_rates_dict[k])
+            return feat
+
+        # We will loop and train for all indicators
+        for ind in INDICATORS.keys():
             gps_set = gp_history.get(iso3, set())
             
-            # Prepare regression data: Y_t = b0 + b1 * Y_t-1 + b2 * GP_t + b3 * year
+            # Prepare regression data
             X = []
             Y = []
-            
             for y in range(1961, 2025):
-                if y in history and (y-1) in history:
-                    # Skip economic crises and pandemic years to prevent bias in individual model parameters
-                    if y in EXCLUDED_ANOMALY_YEARS:
-                        continue
-                    # Features: [Y_t-1, GP_t, year]
-                    gp_val = 1.0 if y in gps_set else 0.0
-                    X.append([history[y-1], gp_val, float(y)])
-                    Y.append(history[y])
+                if y in EXCLUDED_ANOMALY_YEARS:
+                    continue
+                gp_val = 1.0 if y in gps_set else 0.0
+                feat = get_var_features_train(y, ind, country_rates, gp_val)
+                X.append(feat)
+                Y.append(country_rates[ind][y])
             
-            has_hosted = len(gps_set) > 0
             b2 = 0.0
-            
             if len(Y) >= 10:
                 X_np = np.array(X)
                 Y_np = np.array(Y)
                 
-                # Fit OLS (needed only for b2 coefficient)
+                # Fit OLS to get the GP coefficient (gp_val is at index 1)
                 ols = LinearRegression()
                 ols.fit(X_np, Y_np)
                 if has_hosted:
@@ -416,6 +449,11 @@ def main():
                 rf = RandomForestRegressor(n_estimators=50, max_depth=4, random_state=42)
                 rf.fit(X_np, Y_np)
                 
+                models["xgboost"][ind] = xgb
+                models["ridge"][ind] = ridge
+                models["rf"][ind] = rf
+                
+                # Calculate metrics on the training set
                 country_record["predictions"]["metrics"]["xgboost"][ind] = {
                     "r2": round(float(r2_score(Y_np, xgb.predict(X_np))), 2),
                     "mae": round(float(mean_absolute_error(Y_np, xgb.predict(X_np))), 2)
@@ -433,120 +471,143 @@ def main():
                 country_record["predictions"]["metrics"]["ridge"][ind] = {"r2": 0.0, "mae": 0.0}
                 country_record["predictions"]["metrics"]["rf"][ind] = {"r2": 0.0, "mae": 0.0}
 
-            # Filtrar anos de anomalia para verificar a recência real
+            # GP effect logic
             valid_gps = [y for y in gps_set if y not in EXCLUDED_ANOMALY_YEARS]
             GP_RECENCY_THRESHOLD = 2005
             gp_effect = b2
-            use_global_fallback = False
-            
-            # Condições para rejeitar o b2 específico do país e usar o global lift
             if (len(gps_set) < 5
                     or abs(b2) < 1e-6
                     or not valid_gps
                     or max(valid_gps) < GP_RECENCY_THRESHOLD):
-                gp_effect = global_gp_lifts[ind]
-                use_global_fallback = True
+                gp_effect = global_gp_lifts.get(ind, 0.0)
+            gp_effects[ind] = gp_effect
+
+        # Now forecast 2025, 2026, 2027 using the joint VAR models
+        latest_year = 2024
+        gp_2025 = 1.0 if 2025 in gp_history.get(iso3, set()) else 0.0
+
+        for m_key in ["xgboost", "ridge", "rf"]:
+            # We need to forecast sequentially. We'll store forecasted rates and reconstructed levels.
+            pred_rates = {
+                2024: {"actual": {ind: country_rates[ind][2024] for ind in INDICATORS.keys()}},
+                2025: {"actual": {}},
+                2026: {"with_gp": {}, "without_gp": {}},
+                2027: {"with_gp": {}, "without_gp": {}}
+            }
             
-            # Now let's forecast 2026 and 2027
-            years_sorted = sorted(list(history.keys()))
-            if not years_sorted:
-                continue
-            
-            latest_year = years_sorted[-1]
-            latest_val = history[latest_year]
-            gp_2025 = 1.0 if 2025 in gps_set else 0.0
-            
-            for m_key in ["xgboost", "ridge", "rf"]:
-                if len(Y) >= 10:
-                    model = xgb if m_key == "xgboost" else (ridge if m_key == "ridge" else rf)
+            pred_levels = {
+                2024: {"actual": {ind: wb_data[iso3][ind].get(2024, 0.0) for ind in INDICATORS.keys()}},
+                2025: {"actual": {}},
+                2026: {"with_gp": {}, "without_gp": {}},
+                2027: {"with_gp": {}, "without_gp": {}}
+            }
+
+            # 1. Forecast 2025 (actual projection)
+            for ind in INDICATORS.keys():
+                history = wb_data[iso3][ind]
+                if ind in models[m_key]:
+                    # Build feature vector using 2024 actual rates
+                    feat_2025 = get_var_features_forecast(pred_rates[2024]["actual"], gp_2025, ind)
+                    pred_rate_2025 = float(models[m_key][ind].predict([feat_2025])[0])
                     
-                    # Project to 2025
-                    val_2025 = float(model.predict([[latest_val, gp_2025, 2025.0]])[0])
-                    min_hist = min(history.values())
-                    max_hist = max(history.values())
-                    val_2025 = max(min(val_2025, max_hist * 1.5), min_hist * 1.5)
-                    
-                    # Predict 2026 without GP
-                    pred_2026_without = float(model.predict([[val_2025, 0.0, 2026.0]])[0])
-                    
-                    # Predict 2026 with GP
-                    if use_global_fallback:
-                        if ind in ["GDP_growth", "Inflation", "Unemployment"]:
-                            pred_2026_with = pred_2026_without + gp_effect
-                        else:
-                            pred_2026_with = pred_2026_without * (1 + gp_effect / 100.0)
-                    else:
-                        pred_2026_with = float(model.predict([[val_2025, 1.0, 2026.0]])[0])
-                        
-                    # Cap predictions
-                    if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"]:
-                        pred_2026_without = max(0.0, pred_2026_without)
-                        pred_2026_with = max(0.0, pred_2026_with)
-                        
-                    # Predict 2027
-                    pred_2027_without = float(model.predict([[pred_2026_without, 0.0, 2027.0]])[0])
-                    if use_global_fallback:
-                        if ind in ["GDP_growth", "Inflation", "Unemployment"]:
-                            pred_2027_with = pred_2027_without + gp_effect
-                        else:
-                            pred_2027_with = pred_2027_without * (1 + gp_effect / 100.0)
-                    else:
-                        pred_2027_with = float(model.predict([[pred_2026_without, 1.0, 2027.0]])[0])
-                        
-                    # Cap predictions
-                    if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"]:
-                        pred_2027_without = max(0.0, pred_2027_without)
-                        pred_2027_with = max(0.0, pred_2027_with)
+                    # Clip prediction to avoid explosions
+                    min_rate = min(country_rates[ind].values())
+                    max_rate = max(country_rates[ind].values())
+                    pred_rate_2025 = max(min(pred_rate_2025, max_rate * 1.5), min_rate * 1.5)
                 else:
                     # Sparse fallback
-                    val_2025 = latest_val
-                    pred_2026_without = latest_val
-                    if ind in ["GDP_growth", "Inflation", "Unemployment"]:
-                        pred_2026_with = pred_2026_without + gp_effect
-                    else:
-                        pred_2026_with = pred_2026_without * (1 + gp_effect / 100.0)
-                    pred_2026_without = max(0.0, pred_2026_without) if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"] else pred_2026_without
-                    pred_2026_with = max(0.0, pred_2026_with) if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"] else pred_2026_with
-                    
-                    pred_2027_without = pred_2026_without
-                    if ind in ["GDP_growth", "Inflation", "Unemployment"]:
-                        pred_2027_with = pred_2027_without + gp_effect
-                    else:
-                        pred_2027_with = pred_2027_without * (1 + gp_effect / 100.0)
-                    pred_2027_without = max(0.0, pred_2027_without) if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"] else pred_2027_without
-                    pred_2027_with = max(0.0, pred_2027_with) if ind in ["Tourism_arrivals", "GDP_pc", "Unemployment"] else pred_2027_with
-                    
-                # Convert predictions for absolute indicators
+                    pred_rate_2025 = pred_rates[2024]["actual"][ind]
+                
+                pred_rates[2025]["actual"][ind] = pred_rate_2025
+
+                # Reconstruct level
+                val_2024_level = pred_levels[2024]["actual"][ind]
                 if ind in ["Tourism_arrivals", "GDP_pc", "FDI"]:
-                    baseline_2025 = val_2025 if val_2025 != 0.0 else 1.0
-                    yoy_2026_with = ((pred_2026_with - baseline_2025) / abs(baseline_2025)) * 100.0
-                    yoy_2026_without = ((pred_2026_without - baseline_2025) / abs(baseline_2025)) * 100.0
-                    
-                    baseline_2026 = pred_2026_without if pred_2026_without != 0.0 else 1.0
-                    yoy_2027_with = ((pred_2027_with - baseline_2026) / abs(baseline_2026)) * 100.0
-                    yoy_2027_without = ((pred_2027_without - baseline_2026) / abs(baseline_2026)) * 100.0
-                    
-                    country_record["predictions"][m_key]["2026"][ind] = {
-                        "with_gp": round(yoy_2026_with, 2),
-                        "without_gp": round(yoy_2026_without, 2),
-                        "baseline": round(baseline_2025, 2)
-                    }
-                    country_record["predictions"][m_key]["2027"][ind] = {
-                        "with_gp": round(yoy_2027_with, 2),
-                        "without_gp": round(yoy_2027_without, 2),
-                        "baseline": round(baseline_2026, 2)
-                    }
+                    val_2025_level = val_2024_level * (1 + pred_rate_2025 / 100.0)
                 else:
-                    country_record["predictions"][m_key]["2026"][ind] = {
-                        "with_gp": round(pred_2026_with, 2),
-                        "without_gp": round(pred_2026_without, 2),
-                        "baseline": round(val_2025, 2)
-                    }
-                    country_record["predictions"][m_key]["2027"][ind] = {
-                        "with_gp": round(pred_2027_with, 2),
-                        "without_gp": round(pred_2027_without, 2),
-                        "baseline": round(pred_2026_without, 2)
-                    }
+                    val_2025_level = pred_rate_2025
+                pred_levels[2025]["actual"][ind] = max(0.0, val_2025_level)
+
+            # 2. Forecast 2026 (without_gp and with_gp)
+            for ind in INDICATORS.keys():
+                history = wb_data[iso3][ind]
+                min_rate = min(country_rates[ind].values())
+                max_rate = max(country_rates[ind].values())
+                
+                # Without GP
+                if ind in models[m_key]:
+                    feat_2026_without = get_var_features_forecast(pred_rates[2025]["actual"], 0.0, ind)
+                    pred_rate_2026_without = float(models[m_key][ind].predict([feat_2026_without])[0])
+                    pred_rate_2026_without = max(min(pred_rate_2026_without, max_rate * 1.5), min_rate * 1.5)
+                else:
+                    pred_rate_2026_without = pred_rates[2025]["actual"][ind]
+                
+                pred_rates[2026]["without_gp"][ind] = pred_rate_2026_without
+
+                # With GP
+                gp_effect = gp_effects.get(ind, 0.0)
+                pred_rate_2026_with = pred_rate_2026_without + gp_effect
+                pred_rate_2026_with = max(min(pred_rate_2026_with, max_rate * 1.5), min_rate * 1.5)
+                pred_rates[2026]["with_gp"][ind] = pred_rate_2026_with
+
+                # Reconstruct levels
+                val_2025_level = pred_levels[2025]["actual"][ind]
+                if ind in ["Tourism_arrivals", "GDP_pc", "FDI"]:
+                    val_2026_without_level = val_2025_level * (1 + pred_rate_2026_without / 100.0)
+                    val_2026_with_level = val_2025_level * (1 + pred_rate_2026_with / 100.0)
+                else:
+                    val_2026_without_level = pred_rate_2026_without
+                    val_2026_with_level = pred_rate_2026_with
+                
+                pred_levels[2026]["without_gp"][ind] = max(0.0, val_2026_without_level)
+                pred_levels[2026]["with_gp"][ind] = max(0.0, val_2026_with_level)
+
+            # 3. Forecast 2027 (without_gp and with_gp)
+            for ind in INDICATORS.keys():
+                history = wb_data[iso3][ind]
+                min_rate = min(country_rates[ind].values())
+                max_rate = max(country_rates[ind].values())
+                
+                # Without GP
+                if ind in models[m_key]:
+                    feat_2027_without = get_var_features_forecast(pred_rates[2026]["without_gp"], 0.0, ind)
+                    pred_rate_2027_without = float(models[m_key][ind].predict([feat_2027_without])[0])
+                    pred_rate_2027_without = max(min(pred_rate_2027_without, max_rate * 1.5), min_rate * 1.5)
+                else:
+                    pred_rate_2027_without = pred_rates[2026]["without_gp"][ind]
+                
+                pred_rates[2027]["without_gp"][ind] = pred_rate_2027_without
+
+                # With GP
+                gp_effect = gp_effects.get(ind, 0.0)
+                pred_rate_2027_with = pred_rate_2027_without + gp_effect
+                pred_rate_2027_with = max(min(pred_rate_2027_with, max_rate * 1.5), min_rate * 1.5)
+                pred_rates[2027]["with_gp"][ind] = pred_rate_2027_with
+
+                # Reconstruct levels (note that baseline for 2027 is 2026 without GP level)
+                val_2026_without_level = pred_levels[2026]["without_gp"][ind]
+                if ind in ["Tourism_arrivals", "GDP_pc", "FDI"]:
+                    val_2027_without_level = val_2026_without_level * (1 + pred_rate_2027_without / 100.0)
+                    val_2027_with_level = val_2026_without_level * (1 + pred_rate_2027_with / 100.0)
+                else:
+                    val_2027_without_level = pred_rate_2027_without
+                    val_2027_with_level = pred_rate_2027_with
+                
+                pred_levels[2027]["without_gp"][ind] = max(0.0, val_2027_without_level)
+                pred_levels[2027]["with_gp"][ind] = max(0.0, val_2027_with_level)
+
+            # Store predictions in JSON
+            for ind in INDICATORS.keys():
+                country_record["predictions"][m_key]["2026"][ind] = {
+                    "with_gp": round(pred_rates[2026]["with_gp"][ind], 2),
+                    "without_gp": round(pred_rates[2026]["without_gp"][ind], 2),
+                    "baseline": round(pred_levels[2025]["actual"][ind], 2)
+                }
+                country_record["predictions"][m_key]["2027"][ind] = {
+                    "with_gp": round(pred_rates[2027]["with_gp"][ind], 2),
+                    "without_gp": round(pred_rates[2027]["without_gp"][ind], 2),
+                    "baseline": round(pred_levels[2026]["without_gp"][ind], 2)
+                }
             
         final_output["countries"][iso3] = country_record
 

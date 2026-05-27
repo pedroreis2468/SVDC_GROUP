@@ -20,18 +20,21 @@ let state = {
 const INDICATOR_DETAILS = {
     "GDP_growth": {
         name: "Crescimento do PIB Real (Anual %)",
+        shortLabel: "PIB",
         desc: "Mede a variação percentual do valor de todos os bens e serviços produzidos no país. Mostra a aceleração ou abrandamento económico geral.",
         format: v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`,
         colorRange: ["#0b132b", "#00d4ff"]
     },
     "Tourism_arrivals": {
         name: "Turismo Internacional (Chegadas)",
+        shortLabel: "Turismo",
         desc: "Número de turistas internacionais que chegam ao país. Indicador direto do impacto de atração e visibilidade global gerado pela F1.",
         format: v => v >= 1e6 ? `${(v/1e6).toFixed(1)}M` : v.toLocaleString('pt-PT'),
         colorRange: ["#09151b", "#00ffaa"]
     },
     "FDI": {
         name: "Investimento Direto Estrangeiro (FDI - USD Correntes)",
+        shortLabel: "IDE (FDI)",
         desc: "Fluxos líquidos de investimento estrangeiro direto (entradas líquidas de capital no país) em dólares americanos correntes. Mede o volume bruto de investimento estrangeiro captado.",
         format: v => {
             if (v === 0) return "$0";
@@ -45,12 +48,14 @@ const INDICATOR_DETAILS = {
     },
     "Inflation": {
         name: "Taxa de Inflação (IPC Anual %)",
+        shortLabel: "Inflação",
         desc: "Variação percentual anual do custo para o consumidor médio. Permite observar pressões nos preços locais ou flutuações associadas a grandes eventos.",
         format: v => `${v.toFixed(2)}%`,
         colorRange: ["#140d1a", "#d946ef"]
     },
     "GDP_pc": {
         name: "PIB per Capita (USD Constante 2015)",
+        shortLabel: "PIB per Capita",
         desc: "Produto Interno Bruto dividido pelo número de habitantes, ajustado pela inflação. Mede o nível de bem-estar económico médio por habitante.",
         format: v => `$${v.toLocaleString('pt-PT', {maximumFractionDigits:0})}`,
         colorRange: ["#0f141d", "#facc15"]
@@ -94,6 +99,40 @@ function formatDeviation(val, ind) {
         return `${symbol}$${absVal.toLocaleString('pt-PT')}`;
     }
     return `${symbol}${absVal.toFixed(2)}`;
+}
+
+// Reconstruir o PIB de um país para um determinado ano com base no PIB de 2023 e no histórico de crescimento
+function getGDPForYear(countryCode, targetYear) {
+    const gdp2023 = COUNTRY_GDP_BILLIONS[countryCode];
+    if (!gdp2023) return 0;
+    
+    const countryData = state.dataset.countries[countryCode];
+    if (!countryData || !state.dataset) return gdp2023;
+    
+    const growthHistory = countryData.indicators["GDP_growth"];
+    if (!growthHistory) return gdp2023;
+    
+    let currentGdp = gdp2023;
+    const yearInt = parseInt(targetYear);
+    
+    if (yearInt === 2023) {
+        return gdp2023;
+    } else if (yearInt < 2023) {
+        for (let y = 2023; y > yearInt; y--) {
+            const rate = growthHistory[String(y)];
+            if (rate !== undefined && rate !== null) {
+                currentGdp = currentGdp / (1 + (rate / 100));
+            }
+        }
+    } else {
+        for (let y = 2024; y <= yearInt; y++) {
+            const rate = growthHistory[String(y)];
+            if (rate !== undefined && rate !== null) {
+                currentGdp = currentGdp * (1 + (rate / 100));
+            }
+        }
+    }
+    return currentGdp;
 }
 
 const ESTIMATED_HOSTING_FEES = {
@@ -265,6 +304,7 @@ function initControls() {
         // Sincroniza títulos e desenhos
         document.getElementById("selected-country-name").innerText = state.dataset.countries[state.selectedCountry].name;
         document.getElementById("predictor-country-name").innerText = state.dataset.countries[state.selectedCountry].name;
+        updateIndicatorDetails();
         updateMapOnly();
         drawTrendChart();
         drawPredictor();
@@ -541,6 +581,7 @@ function drawMap() {
                     .attr("stroke-width", c => c.id === state.selectedCountry ? 2.2 : 0.6);
 
                 // Redesenha gráficos dependentes do país selecionado
+                updateIndicatorDetails();
                 drawTrendChart();
                 drawPredictor();
                 drawKeyFindings();
@@ -587,6 +628,7 @@ function drawMap() {
 
 // Atualização de cor rápida durante a animação do slider (evita reconstruir tudo)
 function updateMapOnly() {
+    updateIndicatorDetails();
     const currentYearStr = String(state.currentYear);
     const ind = state.currentIndicator;
     const indDetails = INDICATOR_DETAILS[ind];
@@ -1263,41 +1305,41 @@ function drawTrendChart() {
             
             if (ind === "Tourism_arrivals") {
                 if (lastGP < 2010) {
-                    insightText += `⚠️ <strong>Viés de Época Detetado:</strong> A F1 decorreu numa era antiga em que o turismo mundial tinha menor escala. A média histórica inferior nos anos com GP (${indDetails.format(avgGP)} vs ${indDetails.format(avgNonGP)}) reflecte esse viés temporal. O modelo preditivo corrige isto e estima um ganho positivo para novas edições.`;
+                    insightText += `⚠️ <strong>Viés de Época & Escala do Turismo:</strong> O país não acolhe a F1 no calendário recente (última edição em ${lastGP}). Historicamente, os anos de GP registaram em média <strong>${indDetails.format(avgGP)}</strong> chegadas vs <strong>${indDetails.format(avgNonGP)}</strong> em anos comuns. Esta diferença negativa reflete o crescimento secular do turismo global nas últimas décadas (fora do período da F1 local) e não um impacto negativo do evento. O modelo preditivo corrige este viés temporal ao isolar a tendência global.`;
                 } else {
-                    insightText += `📈 O país manteve-se ativo no calendário recente. Os anos de GP registaram em média uma afluência de <strong>${indDetails.format(avgGP)}</strong> comparado com <strong>${indDetails.format(avgNonGP)}</strong> nos anos comuns.`;
+                    insightText += `📈 <strong>Dinamismo no Setor de Turismo:</strong> O país acolhe ativamente o evento no calendário moderno. Os anos de Grande Prémio registaram em média <strong>${indDetails.format(avgGP)}</strong> chegadas de turistas internacionais, em comparação com <strong>${indDetails.format(avgNonGP)}</strong> nos anos sem GP (diferença média de <strong>+${indDetails.format(diff)}</strong>). Isto demonstra uma correlação direta com a atratividade turística gerada pela projeção mediática da F1.`;
                 }
             } else if (ind === "GDP_growth") {
                 if (diff < 0) {
-                    insightText += `📉 A taxa de crescimento do PIB foi ligeiramente inferior nos anos com GP (diferença média de <strong>${diff.toFixed(2)} pp</strong>). Isto indica que a F1, embora impulsione o consumo local, tem um impacto direto marginal na taxa de crescimento anual agregada nacional, que é ditada por ciclos macroeconómicos globais.`;
+                    insightText += `📉 <strong>Ciclo Económico vs. Impacto Setorial:</strong> O crescimento do PIB Real foi marginalmente inferior nos anos com GP (média de <strong>${avgGP.toFixed(2)}%</strong> com GP vs <strong>${avgNonGP.toFixed(2)}%</strong> sem GP, diferença de <strong>${diff.toFixed(2)} pp</strong>). Isto reflete a dominância dos ciclos macroeconómicos globais (taxas de juro, comércio internacional) sobre o impacto local da F1. Embora a corrida estimule fortemente setores específicos (hotelaria, restauração), a sua escala agregada anual é absorvida pelo ruído estatístico nacional.`;
                 } else {
-                    insightText += `🚀 Mostra uma correlação favorável com um prémio de crescimento de PIB de <strong>+${diff.toFixed(2)} pp</strong> nos anos de corrida, coincidindo com fases de expansão económica nacional.`;
+                    insightText += `🚀 <strong>Aceleração de Curto Prazo:</strong> Observa-se um prémio positivo de crescimento económico nos anos com GP (média de <strong>${avgGP.toFixed(2)}%</strong> vs <strong>${avgNonGP.toFixed(2)}%</strong>, diferença de <strong>+${diff.toFixed(2)} pp</strong>). Isto sugere que a organização do evento coincide com fases de expansão económica e robustez do consumo interno, onde o investimento público/privado na infraestrutura do circuito gera um efeito multiplicador temporário no produto nacional.`;
                 }
             } else if (ind === "Unemployment") {
                 if (diff < 0) {
-                    insightText += `💼 <strong>Criação de Emprego:</strong> A taxa de desemprego foi em média <strong>${Math.abs(diff).toFixed(2)} pp inferior</strong> nos anos com corrida. Há uma correlação positiva com períodos de forte contratação e atividade económica no mercado local.`;
+                    insightText += `💼 <strong>Criação de Emprego & Atividade:</strong> A taxa de desemprego foi em média <strong>${avgGP.toFixed(2)}%</strong> nos anos de GP vs <strong>${avgNonGP.toFixed(2)}%</strong> em anos comuns (diferença de <strong>${diff.toFixed(2)} pp</strong>). Há uma correlação positiva com períodos de forte contratação e atividade económica no mercado de trabalho local associada à preparação e realização do evento.`;
                 } else {
-                    insightText += `💼 A taxa de desemprego média foi ligeiramente superior (+${diff.toFixed(2)} pp) nos anos com corrida. Isso sugere que o evento cria emprego temporário local, mas não altera a taxa estrutural nacional de desemprego.`;
+                    insightText += `💼 <strong>Rigidez Estrutural do Emprego:</strong> A taxa de desemprego média foi ligeiramente superior nos anos de GP (diferença de <strong>+${diff.toFixed(2)} pp</strong>). Isso sugere que o evento cria emprego temporário no setor de serviços, mas não altera a taxa estrutural de desemprego do país a longo prazo.`;
                 }
             } else if (ind === "Inflation") {
                 if (diff > 0) {
-                    insightText += `⚠️ Os anos com GP registaram maior inflação (diferença de <strong>+${diff.toFixed(2)} pp</strong>). Isto reflete maioritariamente os períodos de inflação estrutural elevada vividos na Europa nos anos 80/90, e não uma pressão inflacionária provocada diretamente pelo evento.`;
+                    insightText += `⚠️ <strong>Enquadramento Inflacionário Estrutural:</strong> A inflação média foi superior nos anos de GP (<strong>${avgGP.toFixed(2)}%</strong> vs <strong>${avgNonGP.toFixed(2)}%</strong>, diferença de <strong>+${diff.toFixed(2)} pp</strong>). Este aumento é essencialmente explicável pelo enquadramento histórico: muitas edições do GP ocorreram durante as décadas de 70 e 80, períodos marcados por crises petrolíferas globais e inflação estrutural elevada, e não por uma pressão sobre a procura induzida diretamente pelo evento.`;
                 } else {
-                    insightText += `✅ Estabilidade de preços observada, sem registo de pressões inflacionárias adicionais significativas nos anos com GP.`;
+                    insightText += `✅ <strong>Estabilidade de Preços & Oferta:</strong> Os anos com corrida registaram inflação controlada (média de <strong>${avgGP.toFixed(2)}%</strong> com GP vs <strong>${avgNonGP.toFixed(2)}%</strong> sem GP, diferença de <strong>${diff.toFixed(2)} pp</strong>). Isto demonstra estabilidade monetária nacional, sugerindo que o pico de procura turística de curto prazo durante a semana do GP é absorvido pela elasticidade da oferta local, sem provocar pressões inflacionárias persistentes a nível macroeconómico.`;
                 }
             } else if (ind === "FDI") {
                 const percentDiff = avgNonGP !== 0 ? (diff / Math.abs(avgNonGP)) * 100.0 : 0.0;
                 const formattedDiff = formatAbsoluteChange(diff, "FDI");
                 if (diff < 0) {
-                    insightText += `🏢 O Investimento Direto Estrangeiro (FDI) foi inferior nos anos de GP (diferença média de <strong>${formattedDiff}</strong> ou <strong>${percentDiff.toFixed(1)}%</strong>). O grande afluxo de IDE em Portugal e outros países tradicionais ocorreu principalmente após a integração de mercados comuns e reformas financeiras secularmente crescentes, coincidindo com períodos fora do calendário de F1.`;
+                    insightText += `🏢 <strong>Fluxos de IDE e Integração de Mercados:</strong> O Investimento Direto Estrangeiro (FDI) líquido anual foi inferior nos anos de GP (média de <strong>${formatAbsoluteChange(avgGP, "FDI")}</strong> vs <strong>${formatAbsoluteChange(avgNonGP, "FDI")}</strong>, diferença de <strong>${formattedDiff}</strong> ou <strong>${percentDiff.toFixed(1)}%</strong>). Historicamente, os maiores fluxos de IDE em países europeus e emergentes decorreram de reformas estruturais e integrações em blocos económicos (como a adesão de Portugal à CEE em 1986), ocorrendo predominantemente fora dos anos de GP.`;
                 } else {
-                    insightText += `🏢 Apresenta uma correlação positiva com o IDE, com uma captação média de <strong>${formattedDiff}</strong> (<strong>+${percentDiff.toFixed(1)}%</strong>) nos anos em que acolheu a corrida.`;
+                    insightText += `🏢 <strong>Captação de Capital & Credibilidade:</strong> Os anos com corrida registaram um fluxo superior de IDE (média de <strong>${formatAbsoluteChange(avgGP, "FDI")}</strong> vs <strong>${formatAbsoluteChange(avgNonGP, "FDI")}</strong>, diferença de <strong>+${formattedDiff}</strong> ou <strong>+${percentDiff.toFixed(1)}%</strong>). A organização do Grande Prémio correlaciona-se com períodos de elevada confiança dos investidores internacionais, projetando estabilidade jurídica e financeira que estimula a entrada de capital produtivo de longo prazo.`;
                 }
             } else if (ind === "GDP_pc") {
                 if (diff < 0) {
-                    insightText += `💰 A média nominal do PIB per capita é menor nos anos de GP devido ao viés de época (GPs no passado). O modelo de regressão autoregressiva deteta a tendência secular e confirma que receber o GP hoje é financeiramente rentável.`;
+                    insightText += `💰 <strong>Viés Temporal do PIB per Capita:</strong> A média do PIB per capita real foi inferior nos anos de GP (<strong>${indDetails.format(avgGP)}</strong> vs <strong>${indDetails.format(avgNonGP)}</strong>). Este resultado é puramente um reflexo do viés temporal de crescimento secular da economia (a F1 decorreu maioritariamente no passado, quando a produtividade e o PIB per capita eram naturalmente inferiores). O nosso modelo autoregressivo corrige este viés ao isolar o crescimento real secular e a tendência tecnológica.`;
                 } else {
-                    insightText += `💰 O PIB per capita registou uma média superior de <strong>+${indDetails.format(diff)}</strong> nos anos de GP, associando o evento a períodos de riqueza e poder de compra nacional mais elevados.`;
+                    insightText += `💰 <strong>Bem-Estar Económico & Produtividade:</strong> O PIB per capita real registou uma média superior nos anos de GP (<strong>${indDetails.format(avgGP)}</strong> vs <strong>${indDetails.format(avgNonGP)}</strong>, diferença de <strong>+${indDetails.format(diff)}</strong>). Isto alinha a organização do Grande Prémio a anos de elevada produtividade do trabalho e maior poder de compra médio da população.`;
                 }
             }
         }
@@ -1335,21 +1377,92 @@ function drawPredictor() {
     const forecastToggleContainer = document.querySelector(".forecast-years-toggle");
 
     let valWithGP, valWithoutGP;
+    const indDetails = INDICATOR_DETAILS[ind];
+    const shortLabel = indDetails ? (indDetails.shortLabel || indDetails.name) : "Métrica";
 
     if (isForecast) {
         if (introEl) introEl.innerHTML = `Simulação preditiva baseada no modelo autoregressivo para <span id="predictor-country-name" class="neon-text-red">${countryData.name}</span>.`;
-        if (scenarioWithTitle) scenarioWithTitle.innerText = "CENÁRIO COM GP";
-        if (scenarioWithoutTitle) scenarioWithoutTitle.innerText = "CENÁRIO SEM GP";
+        if (scenarioWithTitle) scenarioWithTitle.innerText = `Cenário Com GP (${shortLabel})`;
+        if (scenarioWithoutTitle) scenarioWithoutTitle.innerText = `Cenário Sem GP (${shortLabel})`;
         if (scenarioWithYear) scenarioWithYear.innerText = `Previsão ${yearStr}`;
         if (scenarioWithoutYear) scenarioWithoutYear.innerText = `Previsão ${yearStr}`;
-        if (netImpactLabel) netImpactLabel.innerText = "Impacto Neto Projetado";
+        if (netImpactLabel) netImpactLabel.innerText = `Impacto Neto (${shortLabel})`;
         if (forecastToggleContainer) forecastToggleContainer.style.display = "flex";
         
+        const modelSelect = document.getElementById("predictor-model-select");
         const modelContainer = document.getElementById("model-selector-container");
-        if (modelContainer) modelContainer.style.display = "flex";
+        
+        const getR2 = (modelKey) => {
+            const metrics = countryData.predictions && countryData.predictions.metrics && countryData.predictions.metrics[modelKey]
+                ? countryData.predictions.metrics[modelKey][ind]
+                : null;
+            return metrics ? metrics.r2 : 0.0;
+        };
+
+        if (modelSelect) {
+            modelSelect.innerHTML = "";
+            const originalLabels = {
+                "ridge": "Regressão Ridge (ML)",
+                "xgboost": "XGBoost Regressor (ML)",
+                "rf": "Random Forest (ML)"
+            };
+
+            const validModels = [];
+            ["ridge", "xgboost", "rf"].forEach(modelKey => {
+                const r2 = getR2(modelKey);
+                if (r2 >= 0.70) {
+                    validModels.push({ key: modelKey, r2: r2 });
+                }
+            });
+
+            if (validModels.length > 0) {
+                if (modelContainer) modelContainer.style.display = "flex";
+                validModels.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.key;
+                    opt.text = `${originalLabels[m.key]} (R²: ${(m.r2 * 100).toFixed(0)}%)`;
+                    modelSelect.appendChild(opt);
+                });
+                
+                if (!validModels.some(m => m.key === state.selectedModel)) {
+                    validModels.sort((a, b) => b.r2 - a.r2);
+                    state.selectedModel = validModels[0].key;
+                }
+                modelSelect.value = state.selectedModel;
+            } else {
+                if (modelContainer) modelContainer.style.display = "none";
+                state.selectedModel = null;
+            }
+        }
 
         const histInfo = document.getElementById("predictor-hist-info");
         if (histInfo) histInfo.remove();
+
+        if (!state.selectedModel) {
+            svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", height / 2 - 10)
+                .attr("text-anchor", "middle")
+                .attr("fill", "var(--text-secondary)")
+                .style("font-size", "0.9rem")
+                .style("font-weight", "600")
+                .text("Previsão Indisponível (R² < 70%)");
+                
+            svg.append("text")
+                .attr("x", width / 2)
+                .attr("y", height / 2 + 15)
+                .attr("text-anchor", "middle")
+                .attr("fill", "var(--text-muted)")
+                .style("font-size", "0.75rem")
+                .text("Nenhum modelo preditivo atingiu o nível de confiança exigido de 70% R².");
+                
+            document.getElementById("val-with-gp").innerText = "—";
+            document.getElementById("val-without-gp").innerText = "—";
+            document.getElementById("val-net-impact").innerText = "—";
+            document.getElementById("model-r2").innerText = "—";
+            document.getElementById("model-mae").innerText = "—";
+            return;
+        }
 
         const predictionsBlock = countryData.predictions && countryData.predictions[state.selectedModel] ? countryData.predictions[state.selectedModel] : null;
         const predObj = predictionsBlock && predictionsBlock[yearStr] ? predictionsBlock[yearStr][ind] : null;
@@ -1380,11 +1493,11 @@ function drawPredictor() {
         }
     } else {
         if (introEl) introEl.innerHTML = `Retrospectiva dos dados reais registados nos anos de corrida vs. comuns para <span id="predictor-country-name" class="neon-text-red">${countryData.name}</span>.`;
-        if (scenarioWithTitle) scenarioWithTitle.innerText = "MÉDIA ANOS COM GP";
-        if (scenarioWithoutTitle) scenarioWithoutTitle.innerText = "MÉDIA ANOS SEM GP";
+        if (scenarioWithTitle) scenarioWithTitle.innerText = `Média Anos Com GP (${shortLabel})`;
+        if (scenarioWithoutTitle) scenarioWithoutTitle.innerText = `Média Anos Sem GP (${shortLabel})`;
         if (scenarioWithYear) scenarioWithYear.innerText = "Histórico Real (1960-2024)";
         if (scenarioWithoutYear) scenarioWithoutYear.innerText = "Histórico Real (1960-2024)";
-        if (netImpactLabel) netImpactLabel.innerText = "Diferença Média Observada";
+        if (netImpactLabel) netImpactLabel.innerText = `Diferença Média (${shortLabel})`;
         if (forecastToggleContainer) forecastToggleContainer.style.display = "none";
         
         const modelContainer = document.getElementById("model-selector-container");
@@ -1472,7 +1585,6 @@ function drawPredictor() {
     const netImpact = valWithGP - valWithoutGP;
 
     // Atualiza os dados nas caixas de texto (Metrics Panel) da UI
-    const indDetails = INDICATOR_DETAILS[ind];
     const formatPercent = v => `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
     
     document.getElementById("val-with-gp").innerText = formatPercent(valWithGP);
@@ -1508,7 +1620,26 @@ function drawPredictor() {
     const roiDescEl = document.getElementById("val-roi-desc");
     if (roiValEl && roiDescEl && feeObj) {
         const hostingFeeM = feeObj.fee;
-        const gdpBn = COUNTRY_GDP_BILLIONS[state.selectedCountry];
+        let gdpBn = COUNTRY_GDP_BILLIONS[state.selectedCountry];
+        if (isForecast) {
+            gdpBn = getGDPForYear(state.selectedCountry, yearStr);
+        } else {
+            const gpYears = countryData.gps ? countryData.gps.filter(y => y <= 2024) : [];
+            if (gpYears.length > 0) {
+                let totalGdp = 0;
+                let count = 0;
+                gpYears.forEach(y => {
+                    const gdp = getGDPForYear(state.selectedCountry, y);
+                    if (gdp > 0) {
+                        totalGdp += gdp;
+                        count++;
+                    }
+                });
+                if (count > 0) {
+                    gdpBn = totalGdp / count;
+                }
+            }
+        }
         
         let baselineVal = 1.0;
         if (isForecast) {
@@ -1520,9 +1651,21 @@ function drawPredictor() {
         } else {
             const history = countryData.indicators[ind];
             if (history) {
-                const years = Object.keys(history).map(Number).filter(y => y <= 2024);
-                const latestYear = years.length > 0 ? Math.max(...years) : 2024;
-                baselineVal = history[latestYear] || 1.0;
+                const gpYears = countryData.gps ? countryData.gps.filter(y => y <= 2024) : [];
+                let validGpVals = [];
+                gpYears.forEach(y => {
+                    const val = history[String(y)];
+                    if (val !== undefined && val !== null) {
+                        validGpVals.push(val);
+                    }
+                });
+                if (validGpVals.length > 0) {
+                    baselineVal = validGpVals.reduce((a, b) => a + b, 0) / validGpVals.length;
+                } else {
+                    const years = Object.keys(history).map(Number).filter(y => y <= 2024);
+                    const latestYear = years.length > 0 ? Math.max(...years) : 2024;
+                    baselineVal = history[latestYear] || 1.0;
+                }
             }
         }
 
@@ -1531,30 +1674,77 @@ function drawPredictor() {
         let roiDesc = "Indicador não monetizável diretamente";
         let roiClass = "roi-value";
 
-        // Se o impacto for marginal (próximo de 0 ou negativo), assumir elevado risco preditivo
-        const isSpeculative = Math.abs(netImpact) < 0.05 || netImpact < 0;
+        // Determinação de estados de retorno com base no impacto líquido
+        const isNegative = netImpact < 0;
+        const isMarginal = Math.abs(netImpact) < 0.05;
 
         if (ind === "GDP_growth" && gdpBn) {
-            gainM = (netImpact / 100) * gdpBn * 1000;
+            // Fator de atribuição local para converter impacto macroeconómico nacional na escala regional do evento
+            const localAttFactor = 1 / (1 + (gdpBn / 150));
+            gainM = (netImpact / 100) * gdpBn * 1000 * localAttFactor;
             const roiPct = ((gainM - hostingFeeM) / hostingFeeM) * 100;
-            roiText = isSpeculative ? "Estimativa Inconclusiva" : `${gainM >= 0 ? "+" : ""}$${Math.abs(gainM).toFixed(0)}M`;
-            roiDesc = isSpeculative ? "Impacto engolido pela margem de erro (Ruído > Sinal)" : `ROI Projetado: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
-            roiClass = `roi-value ${isSpeculative ? "neon-text-red" : (gainM >= 0 ? "neon-text-green" : "neon-text-green-negative")}`;
-            if (isSpeculative) roiValEl.style.fontSize = "1rem"; // Ajuste visual
+            
+            if (isNegative) {
+                roiText = "Risco Fiscal Elevado";
+                roiDesc = `Retorno Macro: ${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. O impacto estimado no PIB é negativo nesta série histórica.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.9rem";
+            } else if (isMarginal) {
+                roiText = "Efeito Marginal";
+                roiDesc = `Retorno Macro: ${roiPct >= 0 ? "+" : ""}${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. Variação do PIB insignificante para cobrir o custo da licença.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.95rem";
+            } else {
+                roiText = `+$${gainM.toFixed(0)}M`;
+                roiDesc = `Retorno Macro Est.: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
+                roiClass = `roi-value ${gainM >= hostingFeeM ? "neon-text-green" : "neon-text-green-negative"}`;
+                roiValEl.style.fontSize = "1.2rem";
+            }
         } else if (ind === "FDI") {
-            gainM = (netImpact / 100) * baselineVal / 1e6;
+            // Desconto para Investimento Direto Estrangeiro na escala nacional vs local (referência $5B de IDE base)
+            const fdiAttFactor = 1 / (1 + (baselineVal / 5e9));
+            gainM = ((netImpact / 100) * baselineVal * fdiAttFactor) / 1e6;
             const roiPct = ((gainM - hostingFeeM) / hostingFeeM) * 100;
-            roiText = isSpeculative ? "Estimativa Inconclusiva" : `${gainM >= 0 ? "+" : ""}$${Math.abs(gainM).toFixed(0)}M`;
-            roiDesc = isSpeculative ? "Impacto engolido pela margem de erro (Ruído > Sinal)" : `ROI Projetado: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
-            roiClass = `roi-value ${isSpeculative ? "neon-text-red" : (gainM >= 0 ? "neon-text-green" : "neon-text-green-negative")}`;
-            if (isSpeculative) roiValEl.style.fontSize = "1rem";
+            
+            if (isNegative) {
+                roiText = "Risco Fiscal Elevado";
+                roiDesc = `Retorno Macro: ${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. O impacto estimado no IDE líquido é negativo nesta série histórica.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.9rem";
+            } else if (isMarginal) {
+                roiText = "Efeito Marginal";
+                roiDesc = `Retorno Macro: ${roiPct >= 0 ? "+" : ""}${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. Variação do IDE insuficiente para amortizar a licença.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.95rem";
+            } else {
+                roiText = `+$${gainM.toFixed(0)}M`;
+                roiDesc = `Retorno Macro Est.: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
+                roiClass = `roi-value ${gainM >= hostingFeeM ? "neon-text-green" : "neon-text-green-negative"}`;
+                roiValEl.style.fontSize = "1.2rem";
+            }
         } else if (ind === "Tourism_arrivals") {
-            gainM = ((netImpact / 100) * baselineVal * AVG_TOURIST_SPEND_USD) / 1e6;
+            // Desconto para chegada de turistas na escala nacional vs local (referência 5M de turistas base)
+            const tourismAttFactor = 1 / (1 + (baselineVal / 5e6));
+            gainM = ((netImpact / 100) * baselineVal * AVG_TOURIST_SPEND_USD * tourismAttFactor) / 1e6;
             const roiPct = ((gainM - hostingFeeM) / hostingFeeM) * 100;
-            roiText = isSpeculative ? "Alto Risco / Efeito Nulo" : `${gainM >= 0 ? "+" : ""}$${gainM >= 1000 ? (gainM/1000).toFixed(1)+"B" : gainM.toFixed(0)+"M"}`;
-            roiDesc = isSpeculative ? "Aumento de turismo insuficiente para cobrir taxa" : `ROI Projetado: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
-            roiClass = `roi-value ${isSpeculative ? "neon-text-red" : (gainM >= 0 ? "neon-text-green" : "neon-text-green-negative")}`;
-            if (isSpeculative) roiValEl.style.fontSize = "1rem";
+            
+            if (isNegative) {
+                roiText = "Risco Fiscal Elevado";
+                roiDesc = `Retorno Macro: ${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. O fluxo de turistas estimado é negativo nesta série histórica.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.9rem";
+            } else if (isMarginal) {
+                roiText = "Efeito Marginal";
+                roiDesc = `Retorno Macro: ${roiPct >= 0 ? "+" : ""}${roiPct.toLocaleString('pt-PT', {maximumFractionDigits: 0})}%. O aumento turístico estimado não cobre a taxa da licença.`;
+                roiClass = "roi-value neon-text-red";
+                roiValEl.style.fontSize = "0.95rem";
+            } else {
+                const formattedGain = gainM >= 1000 ? `$${(gainM/1000).toFixed(1)}B` : `$${gainM.toFixed(0)}M`;
+                roiText = `+${formattedGain}`;
+                roiDesc = `Retorno Macro Est.: ${roiPct >= 0 ? "+" : ""}${roiPct.toFixed(0)}%`;
+                roiClass = `roi-value ${gainM >= hostingFeeM ? "neon-text-green" : "neon-text-green-negative"}`;
+                roiValEl.style.fontSize = "1.2rem";
+            }
         }
 
         roiValEl.innerText  = roiText;
@@ -1754,8 +1944,14 @@ function drawKeyFindings() {
         const prevVal = countryData.indicators[indTourism][prevYearStr];
         if (val !== undefined && val !== null && prevVal !== undefined && prevVal !== null && prevVal > 0) {
             const yoy = ((val - prevVal) / prevVal) * 100;
-            const yoySign = yoy >= 0 ? "+" : "";
-            subEl.textContent = `${yoySign}${yoy.toFixed(1)}% YoY vs ano anterior`;
+            const absYoY = Math.abs(yoy).toFixed(1);
+            if (yoy > 0) {
+                subEl.textContent = `Aumentou ${absYoY}% vs ano anterior`;
+            } else if (yoy < 0) {
+                subEl.textContent = `Diminuiu ${absYoY}% vs ano anterior`;
+            } else {
+                subEl.textContent = "Sem variação vs ano anterior";
+            }
             subEl.className = `finding-sub ${yoy >= 0 ? "neon-text-green" : "neon-text-green-negative"}`;
         } else {
             subEl.textContent = "Sem variação YoY";
@@ -1804,8 +2000,14 @@ function drawKeyFindings() {
         const prevVal = countryData.indicators[indFDI][prevYearStr];
         if (val !== undefined && val !== null && prevVal !== undefined && prevVal !== null && prevVal !== 0) {
             const yoy = ((val - prevVal) / Math.abs(prevVal)) * 100;
-            const yoySign = yoy >= 0 ? "+" : "";
-            subEl.textContent = `${yoySign}${yoy.toFixed(1)}% YoY vs ano anterior`;
+            const absYoY = Math.abs(yoy).toFixed(1);
+            if (yoy > 0) {
+                subEl.textContent = `Aumentou ${absYoY}% vs ano anterior`;
+            } else if (yoy < 0) {
+                subEl.textContent = `Diminuiu ${absYoY}% vs ano anterior`;
+            } else {
+                subEl.textContent = "Sem variação vs ano anterior";
+            }
             subEl.className = `finding-sub ${yoy >= 0 ? "neon-text-green" : "neon-text-green-negative"}`;
         } else {
             subEl.textContent = "Sem variação YoY";
@@ -1860,7 +2062,7 @@ const STORY_SLIDES = [
         tab: "real",
         text: `Portugal organizou o GP no Estoril até 1996 e regressou brevemente em Portimão (2020-2021). A atração de turistas estrangeiros é um dos argumentos mais fortes para o financiamento público.
         <br><br>
-        Se olharmos para 1996, Portugal registava cerca de <strong>10.2M de chegadas de turistas</strong>. O impacto local da F1 é significativo a curto prazo, mas os nossos modelos revelam que, ao nível macroeconómico nacional, o impacto líquido no turismo anual dilui-se no ruído estatístico geral do país.`
+        Se olharmos para 1996, Portugal registava cerca de <strong>9.7M de chegadas de turistas</strong>. O impacto local da F1 é significativo a curto prazo, mas os nossos modelos revelam que, ao nível macroeconómico nacional, o impacto líquido no turismo anual dilui-se no ruído estatístico geral do país.`
     },
     {
         title: "3. O Fenómeno dos 'GP Premium' e Soft Power",
@@ -1870,7 +2072,7 @@ const STORY_SLIDES = [
         tab: "real",
         text: `Os <strong>'GP Premium'</strong> referem-se a países como a Arábia Saudita, Qatar, Azerbaijão, Bahrein e Emirados Árabes Unidos (Abu Dhabi), que pagam taxas de licenciamento astronómicas (<strong>$40M a $57M</strong> por ano). Estes eventos são fortemente subsidiados para alavancar a visibilidade global.
         <br><br>
-        Para o <strong>Azerbaijão</strong> (Baku), o GP funciona como um motor de branding nacional pós-petróleo. A análise regressiva indica um acréscimo médio de <strong>+0.98 pp</strong> no crescimento do PIB em anos de corrida, o maior registado, embora com custos fiscais diretos astronómicos.`
+        Para o <strong>Azerbaijão</strong> (Baku), o GP funciona como um motor de branding nacional pós-petróleo. Embora a F1 impulsione a visibilidade internacional, as nossas estimativas sugerem um impacto líquido estrutural marginal de <strong>-0.47 pp</strong> no crescimento do PIB sob o modelo de Ridge, indicando que os elevados custos fiscais diluem o retorno económico agregado direto, justificando o evento principalmente por via de <em>soft power</em> e prestígio geopolítico.`
     },
     {
         title: "4. Investimento Estrangeiro Direto (FDI)",
@@ -1891,7 +2093,7 @@ const STORY_SLIDES = [
         model: "ridge",
         text: `Faz sentido Portugal tentar recuperar a F1 para 2026 ou 2027?
         <br><br>
-        O nosso simulador preditivo estima um <strong>Ganho Económico de Turismo</strong> de <strong>+$1,127M</strong> baseando-se num acréscimo líquido de <strong>+3.57%</strong> em chegadas (+750 mil turistas) contra uma taxa de licença de $22M. Isto representa um ROI altamente positivo para o setor turístico local.
+        O nosso simulador preditivo estima um <strong>Ganho Económico de Turismo</strong> de <strong>+$999M</strong> baseando-se num acréscimo líquido de <strong>+3.32%</strong> em chegadas (+666 mil turistas) sobre uma base de 20.1M de turistas, contra uma taxa de licença de $22M. Isto representa um ROI altamente positivo para o setor turístico local.
         <br><br>
         Contudo, se alternar o seletor para <strong>PIB Real</strong> verá que o impacto direto é inconclusivo (-1.10 pp) devido à volatilidade das contas públicas e infraestruturas, confirmando que o evento se justifica principalmente pela ótica de visibilidade e turismo.`
     }
